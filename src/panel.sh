@@ -177,6 +177,9 @@ panel_relay_add() {
     read -r -p "中转名称（字母/数字/点/下划线/短横线）: " name
     [[ $name =~ ^[A-Za-z0-9_.-]{1,32}$ ]] || { msg "中转名称无效。"; return 1; }
     tag="codex-relay-$name"
+    if [[ -s $panel_relay_db ]] && awk -F '\\t' -v n="$name" '$1==n {found=1} END {exit !found}' "$panel_relay_db"; then
+        msg "中转名称已存在，请先删除旧配置。"; return 1
+    fi
     [[ $is_config_json ]] || return 1
     read -r -p "上游 SOCKS5 地址: " host
     [[ $host =~ ^[A-Za-z0-9._:-]+$ ]] || { msg "地址格式无效。"; return 1; }
