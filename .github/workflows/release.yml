@@ -75,7 +75,7 @@ jobs:
           path: dist
           merge-multiple: true
       - name: Package script
-        run: tar -czf code.tar.gz ./*
+        run: tar --exclude='./dist' -czf code.tar.gz ./*
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
