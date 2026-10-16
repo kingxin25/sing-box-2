@@ -192,7 +192,7 @@ panel_updates() {
 }
 panel_nodes() {
     local c
-    msg "\n1 添加节点/协议  2 修改参数  3 删除节点  4 查看节点  5 受限网络 TLS 添加  0 返回"
+    msg "\n1 添加节点/协议  2 修改参数  3 删除节点  4 查看节点  5 不自动申请 TLS 添加  0 返回"
     read -r -p "选择: " c
     case $c in 1) add ;; 2) change ;; 3) del ;; 4) info ;; 5) is_no_auto_tls=1; add; unset is_no_auto_tls ;; 0|"") return ;; *) msg "无效选项。" ;; esac
 }
