@@ -16,12 +16,12 @@ account_list() {
 }
 account_register() {
     local account config expiry quota epoch temp file
-    shopt -s nullglob; local files=("$is_conf_dir"/*.json); shopt -u nullglob
+    shopt -s nullglob; local files=("$is_conf_dir"/*.json "$is_conf_dir"/*.json.disabled); shopt -u nullglob
     (("${#files[@]}" == 0)) && { msg "请先添加 sing-box 节点。"; return 1; }
     msg "选择配置（一个配置作为一个本地账号）:"
     select file in "${files[@]##*/}" "取消"; do
         [[ $file == "取消" || ! $file ]] && return
-        config=${file%.json}; break
+        config=${file##*/}; config=${config%.disabled}; config=${config%.json}; break
     done
     read -r -p "账号名称: " account
     [[ $account =~ ^[A-Za-z0-9_.-]{1,32}$ ]] || { msg "名称仅支持 1-32 位字母、数字、点、下划线、短横线。"; return 1; }
@@ -77,10 +77,10 @@ WantedBy=timers.target
 UNIT
         systemctl daemon-reload && systemctl enable --now sing-box-account-enforce.timer
     elif [[ $is_openrc && -d /etc/periodic ]]; then
-        mkdir -p /etc/periodic/5min
+        mkdir -p /etc/periodic/15min
         printf '%s\n' '#!/bin/sh' '/usr/local/bin/sing-box account-enforce' >/etc/periodic/5min/sing-box-account-enforce
         chmod 700 /etc/periodic/5min/sing-box-account-enforce
-        msg "已加入 OpenRC periodic 任务；请确认 crond 已启用。"
+        msg "已加入 OpenRC 15 分钟 periodic 任务；请确认 crond 已启用。"
     else msg "当前系统不支持已知的定时服务。"; return 1; fi
     msg "自动到期检查已启用（每 5 分钟）。"
 }
