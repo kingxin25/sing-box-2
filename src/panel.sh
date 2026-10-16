@@ -218,6 +218,22 @@ panel_restore() {
     else msg "已取消恢复。"; fi
     rm -f "$temp"
 }
+panel_certificates() {
+    if [[ ! $is_caddy || ! -x $is_caddy_bin ]]; then
+        msg "Caddy/ACME 尚未配置。添加域名 TLS 节点时，Caddy 会按配置自动申请和续期证书。"
+        return
+    fi
+    msg "Caddy 配置检查:"
+    "$is_caddy_bin" validate --config "$is_caddyfile" || return 1
+    msg "Caddy 当前状态: $is_caddy_status"
+    if command -v journalctl >/dev/null 2>&1; then
+        msg "近 7 天 ACME/TLS 日志:"
+        journalctl -u caddy --since "7 days ago" --no-pager 2>/dev/null | grep -Ei "acme|certificate|tls" | tail -n 40 || msg "没有匹配的证书日志。"
+    else
+        msg "当前系统没有 journalctl；请查看 Caddy 服务日志确认 ACME 申请和续期情况。"
+    fi
+    [[ -d /var/lib/caddy/.local/share/caddy/certificates ]] && du -sh /var/lib/caddy/.local/share/caddy/certificates
+}
 panel_updates() {
     local c
     msg "\n1 更新内核  2 更新管理脚本  3 更新 Caddy  4 加密备份  5 恢复备份  6 证书状态  0 返回"
@@ -225,8 +241,7 @@ panel_updates() {
     case $c in
     1) update core ;; 2) update sh ;; 3) [[ $is_caddy ]] && update caddy || msg "Caddy 尚未安装。" ;;
     4) panel_backup ;; 5) panel_restore ;;
-    6) if [[ $is_caddy ]]; then msg "Caddy $is_caddy_ver: $is_caddy_status"; [[ -d /var/lib/caddy ]] && du -sh /var/lib/caddy
-       else msg "Caddy/ACME 未配置；域名 TLS 节点可由 Caddy 自动申请证书。"; fi ;;
+    6) panel_certificates ;;
     0|"") return ;; *) msg "无效选项。" ;;
     esac
 }
