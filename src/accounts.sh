@@ -102,7 +102,7 @@ account_remove() {
     done
 }
 \t' "$account_db" || { msg "未找到账号。"; return 1; }
-    panel_confirm "只删除账号登记，不删除节点配置或停用服务?" || return
+    panel_confirm "只删除账号登记，不删除节点文件；已到期而停用的配置仍保持停用?" || return
     temp=$(mktemp "$is_core_dir/.accounts.XXXXXX") || return 1
     awk -F '\t' -v n="$account" '$1 != n' "$account_db" > "$temp"
     chmod 600 "$temp"; mv -f "$temp" "$account_db"
