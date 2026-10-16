@@ -5,19 +5,66 @@ panel_confirm() { local answer; read -r -p "$1 [y/N]: " answer; [[ "$answer" =~ 
 panel_pause() { read -r -p "按 Enter 返回..." _; }
 
 panel_export_urls() {
-    local f n u out
+    local f n u label out count=0
     mkdir -p "$is_core_dir/exports"
-    out="$is_core_dir/exports/subscription-$(date +%Y%m%d-%H%M%S).txt"
+    out="$is_core_dir/exports/personal-subscription.txt"
     : >"$out"
     shopt -s nullglob; local files=("$is_conf_dir"/*.json); shopt -u nullglob
     for f in "${files[@]}"; do
         n=${f##*/}; n=${n%.json}
         u=$( (is_dont_show_info=1; info "$n" >/dev/null 2>&1; printf '%s' "$is_url") )
-        [[ $u ]] && printf '%s\n' "$u" >>"$out"
+        [[ $u ]] || continue
+        read -r -p "节点显示名称 [$n]: " label
+        label=${label:-$n}
+        [[ $label =~ ^[A-Za-z0-9._-]{1,64}$ ]] || { msg "名称仅支持字母、数字、点、下划线、短横线；本项跳过。"; continue; }
+        printf '%s#%s\n' "${u%%#*}" "$label" >>"$out"
+        ((count++))
     done
-    if [[ -s $out ]]; then chmod 600 "$out"; msg "订阅链接已导出: $out（权限 600，含连接凭据）"
-    else rm -f "$out"; msg "没有可导出的节点链接。"; fi
+    if ((count > 0)); then chmod 640 "$out"; msg "订阅已更新: $out（权限 640）"
+    else rm -f "$out"; msg "没有可导出的节点链接。"; return 1; fi
 }
+panel_https_subscription() {
+    local domain token snippet tmp backup
+    [[ $is_caddy && -x $is_caddy_bin ]] || { msg "需要先安装并启用 Caddy。"; return 1; }
+    command -v getent >/dev/null 2>&1 && getent group caddy >/dev/null || { msg "未找到 caddy 组，无法安全授权订阅文件读取。"; return 1; }
+    panel_export_urls || return 1
+    read -r -p "已解析到本机的订阅域名: " domain
+    [[ $domain =~ ^[A-Za-z0-9.-]+[.][A-Za-z]{2,}$ ]] || { msg "域名格式无效。"; return 1; }
+    token=$(openssl rand -hex 24) || return 1
+    snippet="$is_caddy_conf/sing-box-personal-subscription.conf"
+    tmp=$(mktemp) || return 1
+    backup=$(mktemp) || { rm -f "$tmp"; return 1; }
+    [[ -f $snippet ]] && cp -p "$snippet" "$backup" || : >"$backup"
+    mkdir -p "$is_caddy_conf"
+    cat >"$tmp" <<EOF
+${domain} {
+    @private_subscription path /s/${token}
+    handle @private_subscription {
+        root * ${is_core_dir}/exports
+        rewrite * /personal-subscription.txt
+        header Content-Type text/plain
+        file_server
+    }
+    handle {
+        respond 404
+    }
+}
+EOF
+    mv -f "$tmp" "$snippet"
+    if ! "$is_caddy_bin" validate --config "$is_caddyfile"; then
+        if [[ -s $backup ]]; then cp -p "$backup" "$snippet"; else rm -f "$snippet"; fi
+        rm -f "$backup"; msg "Caddy 配置验证失败，已回滚。"; return 1
+    fi
+    rm -f "$backup"
+    chown root:caddy "$is_core_dir/exports/personal-subscription.txt"
+    chmod 640 "$is_core_dir/exports/personal-subscription.txt"
+    manage restart caddy || return 1
+    printf '%s\n' "https://${domain}/s/${token}" >"$is_core_dir/exports/personal-subscription.url"
+    chmod 600 "$is_core_dir/exports/personal-subscription.url"
+    msg "HTTPS 个人订阅已配置。请确保域名解析到本机且 80/443 可访问。"
+    msg "订阅地址: https://${domain}/s/${token}"
+}
+
 panel_accounts() {
     load accounts.sh
     account_menu
@@ -151,9 +198,9 @@ panel_nodes() {
 }
 panel_subscriptions() {
     local c
-    msg "\n1 节点信息/URL  2 二维码  3 导出本地订阅文件  4 本地配置列表  0 返回"
+    msg "\n1 节点信息/URL  2 二维码  3 生成/更新订阅文件  4 本地账号管理  5 配置 HTTPS 个人订阅  0 返回"
     read -r -p "选择: " c
-    case $c in 1) info ;; 2) url_qr qr ;; 3) panel_export_urls ;; 4) panel_accounts ;; 0|"") return ;; *) msg "无效选项。" ;; esac
+    case $c in 1) info ;; 2) url_qr qr ;; 3) panel_export_urls ;; 4) panel_accounts ;; 5) panel_https_subscription ;; 0|"") return ;; *) msg "无效选项。" ;; esac
 }
 panel_settings() {
     local c
