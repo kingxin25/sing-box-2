@@ -14,7 +14,7 @@ get_latest_version() {
         ;;
     esac
     if [[ $1 == core ]]; then
-        latest_ver=$(_wget -qO- $url | grep -Eo "sing-box-v[0-9.]+-linux-${is_arch}\\.tar\\.gz" | head -n1 | sed -E 's/^sing-box-(v[0-9.]+)-linux-.*/\\1/')
+        latest_ver=$(_wget -qO- $url | grep -Eo "sing-box-v[0-9.]+-linux-${is_arch}\\.tar\\.gz" | head -n1 | sed -E 's/^sing-box-(v[0-9.]+)-linux-.*/\1/')
     else
         latest_ver=$(_wget -qO- $url | grep tag_name | grep -E -o 'v([0-9.]+)')
     fi
