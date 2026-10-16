@@ -230,11 +230,22 @@ panel_updates() {
     0|"") return ;; *) msg "无效选项。" ;;
     esac
 }
+panel_add_dual() {
+    msg "将依次创建一个 Reality 节点和一个 Hysteria2 节点，每个节点分别设置名称、端口和密码。"
+    panel_confirm "开始添加双协议节点?" || return
+    add reality || { msg "Reality 节点未完成，已停止双协议向导。"; return 1; }
+    add hy2
+}
 panel_nodes() {
     local c
-    msg "\n1 添加节点/协议  2 修改参数  3 删除节点  4 查看节点  5 不自动申请 TLS 添加  0 返回"
+    msg "\\n1 添加节点/协议  2 修改参数  3 删除节点  4 查看节点  5 不自动申请 TLS 添加  6 Reality + Hysteria2 双协议  0 返回"
     read -r -p "选择: " c
-    case $c in 1) add ;; 2) change ;; 3) del ;; 4) info ;; 5) is_no_auto_tls=1; add; unset is_no_auto_tls ;; 0|"") return ;; *) msg "无效选项。" ;; esac
+    case $c in
+    1) add ;; 2) change ;; 3) del ;; 4) info ;;
+    5) is_no_auto_tls=1; add; unset is_no_auto_tls ;;
+    6) panel_add_dual ;;
+    0|"") return ;; *) msg "无效选项。" ;;
+    esac
 }
 panel_subscriptions() {
     local c
