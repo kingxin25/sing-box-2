@@ -84,6 +84,30 @@ UNIT
     else msg "当前系统不支持已知的定时服务。"; return 1; fi
     msg "自动到期检查已启用（每 5 分钟）。"
 }
+account_remove() {
+    local account temp
+    read -r -p "要解除登记的账号名称: " account
+    [[ $account =~ ^[A-Za-z0-9_.-]{1,32}$ && -s $account_db ]] || { msg "账号名称无效。"; return 1; }
+    grep -Fq "$account"
+    local c
+    while :; do
+        msg "\n=== 单机本地用户 ==="
+        msg "1 登记/更新账号  2 查看账号  3 启用到期停用  4 立即检查到期  5 解除账号登记"
+        msg "流量配额暂为登记项，强制执行后端尚未接入。  0 返回"
+        read -r -p "选择: " c
+        case $c in
+        1) account_register ;; 2) account_list ;; 3) account_install_timer ;; 4) account_enforce_expiry ;; 5) account_remove ;;
+        0|"") return ;; *) msg "无效选项。" ;;
+        esac
+    done
+}
+\t' "$account_db" || { msg "未找到账号。"; return 1; }
+    panel_confirm "只删除账号登记，不删除节点配置或停用服务?" || return
+    temp=$(mktemp "$is_core_dir/.accounts.XXXXXX") || return 1
+    awk -F '\t' -v n="$account" '$1 != n' "$account_db" > "$temp"
+    chmod 600 "$temp"; mv -f "$temp" "$account_db"
+    msg "账号登记已解除。"
+}
 account_menu() {
     local c
     while :; do
