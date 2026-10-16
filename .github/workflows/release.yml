@@ -9,21 +9,64 @@ permissions:
   contents: write
 
 jobs:
-  build:
+  core:
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
     runs-on: ubuntu-latest
     steps:
-      - name: checkout
-        uses: actions/checkout@v3
+      - name: Resolve upstream sing-box release
+        id: upstream
+        run: echo "tag=$(curl -fsSL https://api.github.com/repos/SagerNet/sing-box/releases/latest | jq -r .tag_name)" >> "$GITHUB_OUTPUT"
+      - name: Checkout upstream sing-box
+        uses: actions/checkout@v4
         with:
-          fetch-depth: 0
-      - name: get ver
+          repository: SagerNet/sing-box
+          ref: ${{ steps.upstream.outputs.tag }}
+          path: upstream
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: upstream/go.mod
+          cache-dependency-path: upstream/go.sum
+      - name: Build with V2Ray API
+        working-directory: upstream
+        env:
+          GOARCH: ${{ matrix.arch }}
+          CGO_ENABLED: 0
+        run: go build -tags with_v2ray_api -trimpath -ldflags="-s -w -buildid=" -o "../sing-box" ./cmd/sing-box
+      - name: Package core
         run: |
-          echo "$(cat *.sh | grep is_sh_ver=)" >> $GITHUB_ENV
-          echo "old=$(git tag | tail -n1)" >> $GITHUB_ENV
-      - name: tar
-        run: tar zcvf code.tar.gz ./*
-      - name: release
-        uses: softprops/action-gh-release@v1
+          mkdir -p "dist/sing-box-${{ steps.upstream.outputs.tag }}-linux-${{ matrix.arch }}"
+          install -m 755 sing-box "dist/sing-box-${{ steps.upstream.outputs.tag }}-linux-${{ matrix.arch }}/sing-box"
+          tar -C dist -czf "sing-box-${{ steps.upstream.outputs.tag }}-linux-${{ matrix.arch }}.tar.gz" "sing-box-${{ steps.upstream.outputs.tag }}-linux-${{ matrix.arch }}"
+      - uses: actions/upload-artifact@v4
         with:
-          files: code.tar.gz
+          name: core-${{ matrix.arch }}
+          path: sing-box-*-linux-${{ matrix.arch }}.tar.gz
+          if-no-files-found: error
+
+  release:
+    needs: core
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout script
+        uses: actions/checkout@v4
+      - name: Set release version
+        run: echo "is_sh_ver=$(grep -h '^is_sh_ver=' ./*.sh | head -n1 | cut -d= -f2)" >> "$GITHUB_ENV"
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: core-*
+          path: dist
+          merge-multiple: true
+      - name: Package script
+        run: tar -czf code.tar.gz ./*
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            code.tar.gz
+            dist/*.tar.gz
           tag_name: ${{ env.is_sh_ver }}
+          body: |
+            sing-box core is built from the latest upstream SagerNet/sing-box release with the with_v2ray_api build tag for local account traffic statistics.
