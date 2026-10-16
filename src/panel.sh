@@ -19,11 +19,8 @@ panel_export_urls() {
     else rm -f "$out"; msg "没有可导出的节点链接。"; fi
 }
 panel_accounts() {
-    shopt -s nullglob; local files=("$is_conf_dir"/*.json); shopt -u nullglob
-    (("${#files[@]}" == 0)) && { msg "当前没有节点配置。"; return; }
-    msg "本地配置（每个 JSON 文件对应一个节点）："
-    printf '  %s\n' "${files[@]##*/}"
-    msg "现有脚本不支持用户流量统计或到期强制停用；本地配额执行器尚未接入。"
+    load accounts.sh
+    account_menu
 }
 panel_services() {
     local c
@@ -122,6 +119,12 @@ panel_restore() {
     fi
     unset password
     tar -tzf "$temp" >/dev/null || { rm -f "$temp"; msg "备份内容无效。"; return 1; }
+    local bad_entry= entry
+    while IFS= read -r entry; do
+        case "$entry" in etc/sing-box|etc/sing-box/*|etc/caddy|etc/caddy/*|etc/letsencrypt|etc/letsencrypt/*|usr/local/bin/sing-box) ;;
+        *) bad_entry=$entry; break ;; esac
+    done < <(tar -tzf "$temp")
+    [[ $bad_entry ]] && { rm -f "$temp"; msg "备份含有允许范围之外的路径，已拒绝恢复。"; return 1; }
     msg "恢复将覆盖备份中的 sing-box/Caddy/证书文件。"
     read -r -p "输入 RESTORE 确认: " confirm
     if [[ $confirm == RESTORE ]]; then tar -xzf "$temp" -C /; msg "恢复完成；请检查配置并重启服务。"
