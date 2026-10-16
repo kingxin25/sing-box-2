@@ -1668,6 +1668,10 @@ main() {
         load realm.sh
         realm_manager "${@:2}"
         ;;
+    account-enforce)
+        load accounts.sh
+        account_enforce_expiry
+        ;;
     dns)
         load dns.sh
         dns_set ${@:2}
