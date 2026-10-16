@@ -73,7 +73,7 @@ panel_services() {
     local c
     while :; do
         msg "\n=== 服务与日志 ==="
-        msg "1 状态  2 启动  3 停止  4 重启  5 日志  6 Argo 状态  0 返回"
+        msg "1 状态  2 启动  3 停止  4 重启  5 日志  0 返回"
         read -r -p "选择: " c
         case $c in
         1) msg "$is_core_name $is_core_ver: $is_core_status"; [[ $is_caddy ]] && msg "Caddy $is_caddy_ver: $is_caddy_status" ;;
@@ -81,7 +81,6 @@ panel_services() {
         3) panel_confirm "停止 sing-box?" && manage stop ;;
         4) panel_confirm "重启 sing-box?" && manage restart ;;
         5) load log.sh; log_set ;;
-        6) if command -v cloudflared >/dev/null 2>&1; then pgrep -af '[c]loudflared' || msg "cloudflared 未运行。"; else msg "未安装 cloudflared；Argo 未配置。"; fi ;;
         0|"") return ;;
         *) msg "无效选项。" ;;
         esac
