@@ -2,6 +2,16 @@
 
 最好用的 sing-box 一键安装脚本 & 管理脚本
 
+# 安装
+
+在支持的 Linux 服务器上以 root 运行：
+
+```bash
+bash <(wget -qO- https://raw.githubusercontent.com/kingxin25/sing-box-2/main/install.sh)
+```
+
+安装脚本会从本仓库的最新 GitHub Release 下载管理脚本包。安装后可运行 `sing-box realm` 安装并打开 xwPF Realm 转发管理器。
+
 # 特点
 
 - 快速安装
