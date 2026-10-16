@@ -18,6 +18,10 @@ jobs:
       - name: Resolve upstream sing-box release
         id: upstream
         run: echo "tag=$(curl -fsSL https://api.github.com/repos/SagerNet/sing-box/releases/latest | jq -r .tag_name)" >> "$GITHUB_OUTPUT"
+      - name: Checkout project sources
+        uses: actions/checkout@v4
+        with:
+          path: project
       - name: Checkout upstream sing-box
         uses: actions/checkout@v4
         with:
@@ -35,6 +39,15 @@ jobs:
           GOARCH: ${{ matrix.arch }}
           CGO_ENABLED: 0
         run: go build -tags with_v2ray_api -trimpath -ldflags="-s -w -buildid=" -o "../sing-box" ./cmd/sing-box
+      - name: Build account stats helper
+        working-directory: upstream
+        env:
+          GOARCH: ${{ matrix.arch }}
+          CGO_ENABLED: 0
+        run: |
+          mkdir -p tools/account-stats
+          cp ../project/tools/account-stats/main.go tools/account-stats/main.go
+          go build -tags with_v2ray_api -trimpath -ldflags="-s -w -buildid=" -o "../account-stats-linux-${{ matrix.arch }}" ./tools/account-stats
       - name: Package core
         run: |
           mkdir -p "dist/sing-box-${{ steps.upstream.outputs.tag }}-linux-${{ matrix.arch }}"
@@ -43,7 +56,9 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: core-${{ matrix.arch }}
-          path: sing-box-*-linux-${{ matrix.arch }}.tar.gz
+          path: |
+            sing-box-*-linux-${{ matrix.arch }}.tar.gz
+            account-stats-linux-${{ matrix.arch }}
           if-no-files-found: error
 
   release:
@@ -67,6 +82,7 @@ jobs:
           files: |
             code.tar.gz
             dist/*.tar.gz
+            dist/account-stats-linux-*
           tag_name: ${{ env.is_sh_ver }}
           body: |
             sing-box core is built from the latest upstream SagerNet/sing-box release with the with_v2ray_api build tag for local account traffic statistics.
