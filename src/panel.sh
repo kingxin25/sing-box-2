@@ -157,17 +157,16 @@ panel_network() {
     local c
     while :; do
         msg "\n=== 服务器与网络 ==="
-        msg "1 初始化  2 资源/流量  3 UFW  4 BBR  5 WARP 状态  6 sing-box 中转  7 xwPF Realm  8 流媒体连通性  0 返回"
+        msg "1 初始化  2 资源/流量  3 UFW  4 BBR  5 sing-box 中转  6 xwPF Realm  7 流媒体连通性  0 返回"
         read -r -p "选择: " c
         case $c in
         1) panel_initialize ;;
         2) panel_resources ;;
         3) panel_firewall ;;
         4) load bbr.sh; _try_enable_bbr ;;
-        5) if command -v warp-cli >/dev/null 2>&1; then warp-cli status; elif ip link show 2>/dev/null | grep -qi warp; then ip -brief link | grep -i warp; else msg "未检测到 WARP 客户端/接口。"; fi ;;
-        6) msg "$is_core_name $is_core_ver: $is_core_status"; msg "尚无中转拓扑向导；当前管理本机节点配置。" ;;
-        7) realm_manager ;;
-        8) panel_streaming_connectivity ;;
+        5) msg "$is_core_name $is_core_ver: $is_core_status"; msg "尚无中转拓扑向导；当前管理本机节点配置。" ;;
+        6) realm_manager ;;
+        7) panel_streaming_connectivity ;;
         0|"") return ;;
         *) msg "无效选项。" ;;
         esac
