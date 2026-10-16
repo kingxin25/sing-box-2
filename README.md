@@ -124,6 +124,12 @@ Usage: sing-box [options]... [args]...
 文档(doc) https://233boy.com/sing-box/sing-box-script/
 ```
 
+# 交互式分类菜单
+
+运行 `sing-box` 打开菜单。当前菜单接入节点添加/修改/删除、URL/二维码、订阅文件导出、服务日志、UFW 规则、BBR、资源状态、WARP/Argo 状态检查、xwPF Realm、更新、加密备份与恢复、Caddy 证书状态以及本地账号到期停用。
+
+本地账号按“一个配置文件对应一个账号”登记；到期检查可由 systemd 定时器或 OpenRC periodic 执行。**流量额度目前仅记录，不会自动统计或限速**；HTTPS 订阅需要预先安装 Caddy、配置域名解析并允许外部访问 80/443。WARP、Argo 与流媒体项目目前提供状态检查，不负责安装或创建服务。
+
 # Realm 网络转发管理
 
 通过 xwPF 管理 Realm 网络转发：
