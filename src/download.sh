@@ -2,7 +2,7 @@ get_latest_version() {
     case $1 in
     core)
         name=$is_core_name
-        url="https://api.github.com/repos/${is_core_repo}/releases/latest?v=$RANDOM"
+        url="https://api.github.com/repos/${is_sh_repo}/releases/latest?v=$RANDOM"
         ;;
     sh)
         name="$is_core_name 脚本"
@@ -13,7 +13,11 @@ get_latest_version() {
         url="https://api.github.com/repos/$is_caddy_repo/releases/latest?v=$RANDOM"
         ;;
     esac
-    latest_ver=$(_wget -qO- $url | grep tag_name | grep -E -o 'v([0-9.]+)')
+    if [[ $1 == core ]]; then
+        latest_ver=$(_wget -qO- $url | grep -Eo "sing-box-v[0-9.]+-linux-${is_arch}\\.tar\\.gz" | head -n1 | sed -E 's/^sing-box-(v[0-9.]+)-linux-.*/\\1/')
+    else
+        latest_ver=$(_wget -qO- $url | grep tag_name | grep -E -o 'v([0-9.]+)')
+    fi
     [[ ! $latest_ver ]] && {
         err "获取 ${name} 最新版本失败."
     }
@@ -32,7 +36,7 @@ download() {
     core)
         name=$is_core_name
         tmpfile=$tmpdir/$is_core.tar.gz
-        link="https://github.com/${is_core_repo}/releases/download/${latest_ver}/${is_core}-${latest_ver:1}-linux-${is_arch}.tar.gz"
+        link="https://github.com/${is_sh_repo}/releases/latest/download/${is_core}-${latest_ver}-linux-${is_arch}.tar.gz"
         download_file
         tar zxf $tmpfile --strip-components 1 -C $is_core_dir/bin
         chmod +x $is_core_bin
