@@ -115,19 +115,59 @@ panel_firewall() {
         esac
     done
 }
+panel_initialize() {
+    local manager
+    [[ $EUID == 0 ]] || { msg "需要 root 权限。"; return 1; }
+    manager=$cmd
+    [[ $manager ]] || manager=$(command -v apt-get || command -v dnf || command -v yum || command -v zypper || command -v apk)
+    [[ $manager ]] || { msg "未识别的包管理器。"; return 1; }
+    msg "将安装基础管理依赖 curl、jq、openssl、tar、vnstat。"
+    panel_confirm "继续初始化?" || return
+    case $manager in
+    *apk*) apk add --no-cache curl jq openssl tar vnstat || return 1 ;;
+    *apt-get*) apt-get update && apt-get install -y curl jq openssl tar vnstat || return 1 ;;
+    *dnf*) dnf install -y curl jq openssl tar vnstat || return 1 ;;
+    *yum*) yum install -y curl jq openssl tar vnstat || return 1 ;;
+    *zypper*) zypper --non-interactive install curl jq openssl tar vnstat || return 1 ;;
+    *) msg "当前包管理器未适配。"; return 1 ;;
+    esac
+    if [[ $is_systemd ]]; then systemctl enable --now vnstat 2>/dev/null || true
+    elif [[ $is_openrc ]]; then rc-update add vnstat default 2>/dev/null || true; rc-service vnstat start 2>/dev/null || true; fi
+    msg "初始化完成；vnstat 开始采集后才会显示历史流量。"
+}
+panel_streaming_connectivity() {
+    local name url code
+    command -v curl >/dev/null 2>&1 || { msg "请先运行服务器初始化安装 curl。"; return 1; }
+    msg "此项只检查服务器到服务首页的 HTTPS 连通性，不判定地区解锁状态。"
+    local -a services=(
+        "Netflix|https://www.netflix.com/"
+        "Disney+|https://www.disneyplus.com/"
+        "Prime Video|https://www.primevideo.com/"
+        "YouTube|https://www.youtube.com/"
+        "TikTok|https://www.tiktok.com/"
+    )
+    for entry in "${services[@]}"; do
+        name=${entry%%|*}; url=${entry#*|}
+        code=$(curl -L -sS -o /dev/null -w '%{http_code}' --connect-timeout 5 --max-time 12 "$url" 2>/dev/null)
+        [[ $code ]] || code=000
+        printf '%-12s HTTPS %s\\n' "$name" "$code"
+    done
+}
 panel_network() {
     local c
     while :; do
         msg "\n=== 服务器与网络 ==="
-        msg "1 资源/流量  2 UFW  3 BBR  4 WARP 状态  5 sing-box 中转状态  6 xwPF Realm  0 返回"
+        msg "1 初始化  2 资源/流量  3 UFW  4 BBR  5 WARP 状态  6 sing-box 中转  7 xwPF Realm  8 流媒体连通性  0 返回"
         read -r -p "选择: " c
         case $c in
-        1) panel_resources ;;
-        2) panel_firewall ;;
-        3) load bbr.sh; _try_enable_bbr ;;
-        4) if command -v warp-cli >/dev/null 2>&1; then warp-cli status; elif ip link show 2>/dev/null | grep -qi warp; then ip -brief link | grep -i warp; else msg "未检测到 WARP 客户端/接口。"; fi ;;
-        5) msg "$is_core_name $is_core_ver: $is_core_status"; msg "尚无中转拓扑向导；当前管理本机节点配置。" ;;
-        6) realm_manager ;;
+        1) panel_initialize ;;
+        2) panel_resources ;;
+        3) panel_firewall ;;
+        4) load bbr.sh; _try_enable_bbr ;;
+        5) if command -v warp-cli >/dev/null 2>&1; then warp-cli status; elif ip link show 2>/dev/null | grep -qi warp; then ip -brief link | grep -i warp; else msg "未检测到 WARP 客户端/接口。"; fi ;;
+        6) msg "$is_core_name $is_core_ver: $is_core_status"; msg "尚无中转拓扑向导；当前管理本机节点配置。" ;;
+        7) realm_manager ;;
+        8) panel_streaming_connectivity ;;
         0|"") return ;;
         *) msg "无效选项。" ;;
         esac
