@@ -1596,71 +1596,8 @@ update() {
 
 # main menu; if no prefer args.
 is_main_menu() {
-    msg "\n------------- $is_core_name script $is_sh_ver by $author -------------"
-    msg "$is_core_name $is_core_ver: $is_core_status"
-    msg "群组(Chat): $(msg_ul https://t.me/tg233boy)"
-    is_main_start=1
-    ask mainmenu
-    case $REPLY in
-    1)
-        add
-        ;;
-    2)
-        change
-        ;;
-    3)
-        info
-        ;;
-    4)
-        del
-        ;;
-    5)
-        ask list is_do_manage "启动 停止 重启"
-        manage $REPLY &
-        msg "\n管理状态执行: $(_green $is_do_manage)\n"
-        ;;
-    6)
-        is_tmp_list=("更新$is_core_name" "更新脚本")
-        [[ $is_caddy ]] && is_tmp_list+=("更新Caddy")
-        ask list is_do_update null "\n请选择更新:\n"
-        update $REPLY
-        ;;
-    7)
-        uninstall
-        ;;
-    8)
-        msg
-        load help.sh
-        show_help
-        ;;
-    9)
-        ask list is_do_other "启用BBR 查看日志 测试运行 重装脚本 设置DNS"
-        case $REPLY in
-        1)
-            load bbr.sh
-            _try_enable_bbr
-            ;;
-        2)
-            load log.sh
-            log_set
-            ;;
-        3)
-            get test-run
-            ;;
-        4)
-            get reinstall
-            ;;
-        5)
-            load dns.sh
-            dns_set
-            ;;
-        esac
-        ;;
-    10)
-        load help.sh
-        about
-        ;;
-    esac
+    load panel.sh
+    panel_main
 }
 
 # check prefer args, if not exist prefer args and show main menu
