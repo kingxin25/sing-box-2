@@ -153,6 +153,379 @@ panel_streaming_connectivity() {
         printf '%-12s HTTPS %s\\n' "$name" "$code"
     done
 }
+panel_relay_db="$is_core_dir/relays.tsv"
+panel_relay_save_config() {
+    local temp=$1
+    if ! "$is_core_bin" check -c "$temp" -C "$is_conf_dir" >/dev/null 2>&1; then
+        rm -f "$temp"; msg "中转配置未通过 sing-box 检查，原配置未更改。"; return 1
+    fi
+    chmod --reference="$is_config_json" "$temp" 2>/dev/null || chmod 600 "$temp"
+    chmod 600 "$temp"
+    mv -f "$temp" "$is_config_json"
+    manage restart
+}
+panel_relay_add() {
+    local name inbound file host port user pass tag outbound temp
+    shopt -s nullglob; local files=("$is_conf_dir"/*.json); shopt -u nullglob
+    (("${#files[@]}" == 0)) && { msg "请先添加节点入站。"; return 1; }
+    msg "选择要经 SOCKS5 上游转发的 sing-box 入站:"
+    select file in "${files[@]##*/}" "取消"; do
+        [[ $file == "取消" || ! $file ]] && return
+        inbound=${file##*/}; inbound=${inbound%.json}; break
+    done
+    [[ -f $panel_relay_db ]] && awk -F '\t' -v i="$inbound" '$2==i {found=1} END {exit !found}' "$panel_relay_db" && { msg "此入站已有中转规则，请先删除旧规则。"; return 1; }
+    read -r -p "中转名称（字母/数字/点/下划线/短横线）: " name
+    [[ $name =~ ^[A-Za-z0-9_.-]{1,32}$ ]] || { msg "中转名称无效。"; return 1; }
+    tag="codex-relay-$name"
+    [[ $is_config_json ]] || return 1
+    read -r -p "上游 SOCKS5 地址: " host
+    [[ $host =~ ^[A-Za-z0-9._:-]+$ ]] || { msg "地址格式无效。"; return 1; }
+    read -r -p "上游端口: " port
+    [[ $port =~ ^[0-9]{1,5}$ ]] && ((port>0 && port<=65535)) || { msg "端口无效。"; return 1; }
+    read -r -p "用户名（无认证留空）: " user
+    if [[ $user ]]; then
+        read -r -s -p "密码: " pass; echo
+        [[ $pass ]] || { msg "启用用户名认证时密码不能为空。"; return 1; }
+    fi
+    outbound=$(jq -n --arg tag "$tag" --arg host "$host" --argjson port "$port" --arg user "$user" --arg pass "$pass" '
+      {type:"socks",tag:$tag,server:$host,server_port:$port,version:"5"} |
+      if $user != "" then . + {username:$user,password:$pass} else . end') || return 1
+    temp=$(mktemp "${is_config_json}.XXXXXX") || return 1
+    if ! jq --argjson out "$outbound" --arg inbound "$inbound" --arg tag "$tag" '
+      (.outbounds //= []) |
+      .outbounds = ([.outbounds[] | select(.tag != $tag)] + [$out]) |
+      (.route //= {}) |
+      (.route.rules //= []) |
+      .route.rules = ([{inbound:[$inbound],action:"route",outbound:$tag}] + [.route.rules[] | select(.outbound != $tag)])
+    ' "$is_config_json" > "$temp"; then rm -f "$temp"; return 1; fi
+    panel_relay_save_config "$temp" || return 1
+    mkdir -p "$is_core_dir"; touch "$panel_relay_db"
+    printf '%s\t%s\t%s\t%s\n' "$name" "$inbound" "$host" "$port" >> "$panel_relay_db"
+    chmod 600 "$panel_relay_db"
+    unset pass
+    msg "中转已启用：入站 $inbound → SOCKS5 $host:$port"
+}
+panel_relay_list() {
+    local name inbound host port
+    [[ -s $panel_relay_db ]] || { msg "尚未配置 sing-box SOCKS5 中转。"; return 0; }
+    printf '%-20s %-24s %s\\n' "名称" "入站" "上游"
+    while IFS=
+    local c
+    while :; do
+        msg "\n=== 服务器与网络 ==="
+        msg "1 初始化  2 资源/流量  3 UFW  4 BBR  5 sing-box 中转  6 xwPF Realm  7 流媒体连通性  0 返回"
+        read -r -p "选择: " c
+        case $c in
+        1) panel_initialize ;;
+        2) panel_resources ;;
+        3) panel_firewall ;;
+        4) load bbr.sh; _try_enable_bbr ;;
+        5) panel_relay_menu ;;
+        6) realm_manager ;;
+        7) panel_streaming_connectivity ;;
+        0|"") return ;;
+        *) msg "无效选项。" ;;
+        esac
+        panel_pause
+    done
+}
+panel_backup() {
+    local dir="$is_core_dir/backups" stamp plain archive password again
+    local paths=()
+    mkdir -p "$dir" || return 1
+    stamp=$(date +%Y%m%d-%H%M%S); archive="$dir/sing-box-$stamp.tar.gz.enc"
+    plain=$(mktemp "$dir/.backup-XXXXXX.tar.gz") || return 1
+    [[ -d /etc/sing-box ]] && paths+=(etc/sing-box)
+    [[ -d /etc/caddy ]] && paths+=(etc/caddy)
+    [[ -d /etc/letsencrypt ]] && paths+=(etc/letsencrypt)
+    [[ -x /usr/local/bin/sing-box ]] && paths+=(usr/local/bin/sing-box)
+    (("${#paths[@]}" == 0)) && { rm -f "$plain"; msg "没有可备份的数据。"; return 1; }
+    tar -czf "$plain" -C / "${paths[@]}" || { rm -f "$plain"; return 1; }
+    read -r -s -p "设置加密密码: " password; echo
+    [[ $password ]] || { rm -f "$plain"; msg "密码不能为空。"; return 1; }
+    read -r -s -p "再次输入密码: " again; echo
+    [[ $password == "$again" ]] || { unset password again; rm -f "$plain"; msg "两次密码不一致。"; return 1; }
+    if printf '%s' "$password" | openssl enc -aes-256-cbc -pbkdf2 -salt -pass stdin -in "$plain" -out "$archive"; then
+        chmod 600 "$archive"; rm -f "$plain"; msg "加密备份: $archive"
+    else rm -f "$plain" "$archive"; msg "备份加密失败。"; fi
+    unset password again
+}
+panel_restore() {
+    local archive temp password confirm
+    read -r -p "备份文件 (.tar.gz.enc): " archive
+    [[ -f $archive && $archive == *.tar.gz.enc ]] || { msg "备份文件无效。"; return 1; }
+    temp=$(mktemp) || return 1
+    read -r -s -p "备份密码: " password; echo
+    if ! printf '%s' "$password" | openssl enc -d -aes-256-cbc -pbkdf2 -pass stdin -in "$archive" -out "$temp"; then
+        rm -f "$temp"; unset password; msg "解密失败。"; return 1
+    fi
+    unset password
+    tar -tzf "$temp" >/dev/null || { rm -f "$temp"; msg "备份内容无效。"; return 1; }
+    local bad_entry= entry
+    while IFS= read -r entry; do
+        case "$entry" in etc/sing-box|etc/sing-box/*|etc/caddy|etc/caddy/*|etc/letsencrypt|etc/letsencrypt/*|usr/local/bin/sing-box) ;;
+        *) bad_entry=$entry; break ;; esac
+    done < <(tar -tzf "$temp")
+    [[ $bad_entry ]] && { rm -f "$temp"; msg "备份含有允许范围之外的路径，已拒绝恢复。"; return 1; }
+    msg "恢复将覆盖备份中的 sing-box/Caddy/证书文件。"
+    read -r -p "输入 RESTORE 确认: " confirm
+    if [[ $confirm == RESTORE ]]; then tar -xzf "$temp" -C /; msg "恢复完成；请检查配置并重启服务。"
+    else msg "已取消恢复。"; fi
+    rm -f "$temp"
+}
+panel_certificates() {
+    if [[ ! $is_caddy || ! -x $is_caddy_bin ]]; then
+        msg "Caddy/ACME 尚未配置。添加域名 TLS 节点时，Caddy 会按配置自动申请和续期证书。"
+        return
+    fi
+    msg "Caddy 配置检查:"
+    "$is_caddy_bin" validate --config "$is_caddyfile" || return 1
+    msg "Caddy 当前状态: $is_caddy_status"
+    if command -v journalctl >/dev/null 2>&1; then
+        msg "近 7 天 ACME/TLS 日志:"
+        journalctl -u caddy --since "7 days ago" --no-pager 2>/dev/null | grep -Ei "acme|certificate|tls" | tail -n 40 || msg "没有匹配的证书日志。"
+    else
+        msg "当前系统没有 journalctl；请查看 Caddy 服务日志确认 ACME 申请和续期情况。"
+    fi
+    [[ -d /var/lib/caddy/.local/share/caddy/certificates ]] && du -sh /var/lib/caddy/.local/share/caddy/certificates
+}
+panel_updates() {
+    local c
+    msg "\n1 更新内核  2 更新管理脚本  3 更新 Caddy  4 加密备份  5 恢复备份  6 证书状态  0 返回"
+    read -r -p "选择: " c
+    case $c in
+    1) update core ;; 2) update sh ;; 3) [[ $is_caddy ]] && update caddy || msg "Caddy 尚未安装。" ;;
+    4) panel_backup ;; 5) panel_restore ;;
+    6) panel_certificates ;;
+    0|"") return ;; *) msg "无效选项。" ;;
+    esac
+}
+panel_add_dual() {
+    msg "将依次创建一个 Reality 节点和一个 Hysteria2 节点，每个节点分别设置名称、端口和密码。"
+    panel_confirm "开始添加双协议节点?" || return
+    add reality || { msg "Reality 节点未完成，已停止双协议向导。"; return 1; }
+    add hy2
+}
+panel_nodes() {
+    local c
+    msg "\\n1 添加节点/协议  2 修改参数  3 删除节点  4 查看节点  5 不自动申请 TLS 添加  6 Reality + Hysteria2 双协议  0 返回"
+    read -r -p "选择: " c
+    case $c in
+    1) add ;; 2) change ;; 3) del ;; 4) info ;;
+    5) is_no_auto_tls=1; add; unset is_no_auto_tls ;;
+    6) panel_add_dual ;;
+    0|"") return ;; *) msg "无效选项。" ;;
+    esac
+}
+panel_subscriptions() {
+    local c
+    msg "\n1 节点信息/URL  2 二维码  3 生成/更新订阅文件  4 本地账号管理  5 配置 HTTPS 个人订阅  0 返回"
+    read -r -p "选择: " c
+    case $c in 1) info ;; 2) url_qr qr ;; 3) panel_export_urls ;; 4) panel_accounts ;; 5) panel_https_subscription ;; 0|"") return ;; *) msg "无效选项。" ;; esac
+}
+panel_settings() {
+    local c
+    msg "\n1 使用说明  2 隐私说明  3 卸载  0 返回"
+    read -r -p "选择: " c
+    case $c in
+    1) load help.sh; show_help ;;
+    2) msg "配置和订阅凭据保存在本机；导出文件需妥善保管。xwPF 由上游项目维护。" ;;
+    3) panel_confirm "将删除 sing-box 配置和管理脚本，继续?" && uninstall ;;
+    0|"") return ;; *) msg "无效选项。" ;;
+    esac
+}
+panel_main() {
+    local c
+    while :; do
+        msg "\n========== sing-box 管理面板 =========="
+        msg "1 节点安装  2 节点与订阅  3 服务与日志"
+        msg "4 服务器与网络  5 更新与备份  6 设置与卸载"
+        msg "7 用户与配额  0 退出"
+        read -r -p "选择菜单: " c
+        case $c in
+        1) panel_nodes ;; 2) panel_subscriptions ;; 3) panel_services ;; 4) panel_network ;;
+        5) panel_updates ;; 6) panel_settings ;; 7) panel_accounts; panel_pause ;;
+        0|"") return ;; *) msg "无效选项。" ;;
+        esac
+    done
+}
+\t' read -r name inbound host port; do
+        printf '%-20s %-24s %s:%s\\n' "$name" "$inbound" "$host" "$port"
+    done < "$panel_relay_db"
+}
+panel_relay_remove() {
+    local name inbound host port tag temp dbtmp
+    [[ -s $panel_relay_db ]] || { msg "没有已登记的中转。"; return 0; }
+    panel_relay_list
+    read -r -p "要删除的中转名称: " name
+    [[ $name =~ ^[A-Za-z0-9_.-]{1,32}$ ]] || { msg "名称无效。"; return 1; }
+    IFS=
+    local c
+    while :; do
+        msg "\n=== 服务器与网络 ==="
+        msg "1 初始化  2 资源/流量  3 UFW  4 BBR  5 sing-box 中转  6 xwPF Realm  7 流媒体连通性  0 返回"
+        read -r -p "选择: " c
+        case $c in
+        1) panel_initialize ;;
+        2) panel_resources ;;
+        3) panel_firewall ;;
+        4) load bbr.sh; _try_enable_bbr ;;
+        5) msg "$is_core_name $is_core_ver: $is_core_status"; msg "尚无中转拓扑向导；当前管理本机节点配置。" ;;
+        6) realm_manager ;;
+        7) panel_streaming_connectivity ;;
+        0|"") return ;;
+        *) msg "无效选项。" ;;
+        esac
+        panel_pause
+    done
+}
+panel_backup() {
+    local dir="$is_core_dir/backups" stamp plain archive password again
+    local paths=()
+    mkdir -p "$dir" || return 1
+    stamp=$(date +%Y%m%d-%H%M%S); archive="$dir/sing-box-$stamp.tar.gz.enc"
+    plain=$(mktemp "$dir/.backup-XXXXXX.tar.gz") || return 1
+    [[ -d /etc/sing-box ]] && paths+=(etc/sing-box)
+    [[ -d /etc/caddy ]] && paths+=(etc/caddy)
+    [[ -d /etc/letsencrypt ]] && paths+=(etc/letsencrypt)
+    [[ -x /usr/local/bin/sing-box ]] && paths+=(usr/local/bin/sing-box)
+    (("${#paths[@]}" == 0)) && { rm -f "$plain"; msg "没有可备份的数据。"; return 1; }
+    tar -czf "$plain" -C / "${paths[@]}" || { rm -f "$plain"; return 1; }
+    read -r -s -p "设置加密密码: " password; echo
+    [[ $password ]] || { rm -f "$plain"; msg "密码不能为空。"; return 1; }
+    read -r -s -p "再次输入密码: " again; echo
+    [[ $password == "$again" ]] || { unset password again; rm -f "$plain"; msg "两次密码不一致。"; return 1; }
+    if printf '%s' "$password" | openssl enc -aes-256-cbc -pbkdf2 -salt -pass stdin -in "$plain" -out "$archive"; then
+        chmod 600 "$archive"; rm -f "$plain"; msg "加密备份: $archive"
+    else rm -f "$plain" "$archive"; msg "备份加密失败。"; fi
+    unset password again
+}
+panel_restore() {
+    local archive temp password confirm
+    read -r -p "备份文件 (.tar.gz.enc): " archive
+    [[ -f $archive && $archive == *.tar.gz.enc ]] || { msg "备份文件无效。"; return 1; }
+    temp=$(mktemp) || return 1
+    read -r -s -p "备份密码: " password; echo
+    if ! printf '%s' "$password" | openssl enc -d -aes-256-cbc -pbkdf2 -pass stdin -in "$archive" -out "$temp"; then
+        rm -f "$temp"; unset password; msg "解密失败。"; return 1
+    fi
+    unset password
+    tar -tzf "$temp" >/dev/null || { rm -f "$temp"; msg "备份内容无效。"; return 1; }
+    local bad_entry= entry
+    while IFS= read -r entry; do
+        case "$entry" in etc/sing-box|etc/sing-box/*|etc/caddy|etc/caddy/*|etc/letsencrypt|etc/letsencrypt/*|usr/local/bin/sing-box) ;;
+        *) bad_entry=$entry; break ;; esac
+    done < <(tar -tzf "$temp")
+    [[ $bad_entry ]] && { rm -f "$temp"; msg "备份含有允许范围之外的路径，已拒绝恢复。"; return 1; }
+    msg "恢复将覆盖备份中的 sing-box/Caddy/证书文件。"
+    read -r -p "输入 RESTORE 确认: " confirm
+    if [[ $confirm == RESTORE ]]; then tar -xzf "$temp" -C /; msg "恢复完成；请检查配置并重启服务。"
+    else msg "已取消恢复。"; fi
+    rm -f "$temp"
+}
+panel_certificates() {
+    if [[ ! $is_caddy || ! -x $is_caddy_bin ]]; then
+        msg "Caddy/ACME 尚未配置。添加域名 TLS 节点时，Caddy 会按配置自动申请和续期证书。"
+        return
+    fi
+    msg "Caddy 配置检查:"
+    "$is_caddy_bin" validate --config "$is_caddyfile" || return 1
+    msg "Caddy 当前状态: $is_caddy_status"
+    if command -v journalctl >/dev/null 2>&1; then
+        msg "近 7 天 ACME/TLS 日志:"
+        journalctl -u caddy --since "7 days ago" --no-pager 2>/dev/null | grep -Ei "acme|certificate|tls" | tail -n 40 || msg "没有匹配的证书日志。"
+    else
+        msg "当前系统没有 journalctl；请查看 Caddy 服务日志确认 ACME 申请和续期情况。"
+    fi
+    [[ -d /var/lib/caddy/.local/share/caddy/certificates ]] && du -sh /var/lib/caddy/.local/share/caddy/certificates
+}
+panel_updates() {
+    local c
+    msg "\n1 更新内核  2 更新管理脚本  3 更新 Caddy  4 加密备份  5 恢复备份  6 证书状态  0 返回"
+    read -r -p "选择: " c
+    case $c in
+    1) update core ;; 2) update sh ;; 3) [[ $is_caddy ]] && update caddy || msg "Caddy 尚未安装。" ;;
+    4) panel_backup ;; 5) panel_restore ;;
+    6) panel_certificates ;;
+    0|"") return ;; *) msg "无效选项。" ;;
+    esac
+}
+panel_add_dual() {
+    msg "将依次创建一个 Reality 节点和一个 Hysteria2 节点，每个节点分别设置名称、端口和密码。"
+    panel_confirm "开始添加双协议节点?" || return
+    add reality || { msg "Reality 节点未完成，已停止双协议向导。"; return 1; }
+    add hy2
+}
+panel_nodes() {
+    local c
+    msg "\\n1 添加节点/协议  2 修改参数  3 删除节点  4 查看节点  5 不自动申请 TLS 添加  6 Reality + Hysteria2 双协议  0 返回"
+    read -r -p "选择: " c
+    case $c in
+    1) add ;; 2) change ;; 3) del ;; 4) info ;;
+    5) is_no_auto_tls=1; add; unset is_no_auto_tls ;;
+    6) panel_add_dual ;;
+    0|"") return ;; *) msg "无效选项。" ;;
+    esac
+}
+panel_subscriptions() {
+    local c
+    msg "\n1 节点信息/URL  2 二维码  3 生成/更新订阅文件  4 本地账号管理  5 配置 HTTPS 个人订阅  0 返回"
+    read -r -p "选择: " c
+    case $c in 1) info ;; 2) url_qr qr ;; 3) panel_export_urls ;; 4) panel_accounts ;; 5) panel_https_subscription ;; 0|"") return ;; *) msg "无效选项。" ;; esac
+}
+panel_settings() {
+    local c
+    msg "\n1 使用说明  2 隐私说明  3 卸载  0 返回"
+    read -r -p "选择: " c
+    case $c in
+    1) load help.sh; show_help ;;
+    2) msg "配置和订阅凭据保存在本机；导出文件需妥善保管。xwPF 由上游项目维护。" ;;
+    3) panel_confirm "将删除 sing-box 配置和管理脚本，继续?" && uninstall ;;
+    0|"") return ;; *) msg "无效选项。" ;;
+    esac
+}
+panel_main() {
+    local c
+    while :; do
+        msg "\n========== sing-box 管理面板 =========="
+        msg "1 节点安装  2 节点与订阅  3 服务与日志"
+        msg "4 服务器与网络  5 更新与备份  6 设置与卸载"
+        msg "7 用户与配额  0 退出"
+        read -r -p "选择菜单: " c
+        case $c in
+        1) panel_nodes ;; 2) panel_subscriptions ;; 3) panel_services ;; 4) panel_network ;;
+        5) panel_updates ;; 6) panel_settings ;; 7) panel_accounts; panel_pause ;;
+        0|"") return ;; *) msg "无效选项。" ;;
+        esac
+    done
+}
+\t' read -r _ inbound host port < <(awk -F '\t' -v n="$name" '$1==n {print; exit}' "$panel_relay_db")
+    [[ $inbound ]] || { msg "未找到此中转。"; return 1; }
+    tag="codex-relay-$name"
+    panel_confirm "删除 $inbound 到 SOCKS5 上游的路由?" || return
+    temp=$(mktemp "${is_config_json}.XXXXXX") || return 1
+    jq --arg inbound "$inbound" --arg tag "$tag" '
+      .outbounds = [(.outbounds // [])[] | select(.tag != $tag)] |
+      if .route then .route.rules = [(.route.rules // [])[] | select(.outbound != $tag)] else . end
+    ' "$is_config_json" > "$temp" || { rm -f "$temp"; return 1; }
+    panel_relay_save_config "$temp" || return 1
+    dbtmp=$(mktemp "${panel_relay_db}.XXXXXX") || return 1
+    awk -F '\t' -v n="$name" '$1!=n' "$panel_relay_db" > "$dbtmp"
+    chmod 600 "$dbtmp"; mv -f "$dbtmp" "$panel_relay_db"
+    msg "中转规则已删除。"
+}
+panel_relay_menu() {
+    local c
+    while :; do
+        msg "\\n=== sing-box 中转（SOCKS5 上游）==="
+        msg "1 新增中转  2 查看中转  3 删除中转  0 返回"
+        read -r -p "选择: " c
+        case $c in
+        1) panel_relay_add ;; 2) panel_relay_list ;; 3) panel_relay_remove ;;
+        0|"") return ;; *) msg "无效选项。" ;;
+        esac
+    done
+}
 panel_network() {
     local c
     while :; do
