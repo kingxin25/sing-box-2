@@ -55,6 +55,7 @@ show_help() {
             "   start, stop, restart [caddy]                    启动, 停止, 重启"
             "   t, test                                         测试运行"
             "   reinstall                                       重装脚本\n"
+            "   realm [install]                                 安装/打开 Realm 网络转发管理\n"
             "测试:"
             # "   client, genc [name]                             显示用于客户端 JSON, 仅供参考"
             "   debug [name]                                    显示一些 debug 信息, 仅供参考"

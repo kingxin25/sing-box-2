@@ -1727,6 +1727,10 @@ main() {
         manage restart &
         [[ $is_del_host ]] && manage restart caddy &
         ;;
+    realm | xwpf | port-forward)
+        load realm.sh
+        realm_manager "${@:2}"
+        ;;
     dns)
         load dns.sh
         dns_set ${@:2}

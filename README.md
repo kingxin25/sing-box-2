@@ -113,3 +113,13 @@ Usage: sing-box [options]... [args]...
 反馈问题) https://github.com/233boy/sing-box/issues
 文档(doc) https://233boy.com/sing-box/sing-box-script/
 ```
+
+# Realm 网络转发管理
+
+通过 xwPF 管理 Realm 网络转发：
+
+```bash
+sing-box realm
+```
+
+首次运行会下载并安装 xwPF，然后进入其管理界面；后续运行该命令可再次打开管理界面。也可以用 `sing-box realm install` 重新运行安装/更新流程。此功能需要 root 权限，并依赖网络连接到 [xwPF 项目](https://github.com/zywe03/realm-xwPF)。xwPF 会创建 `/usr/local/bin/pf` 快捷命令并在 `/usr/local/bin/lib` 写入模块；本集成在发现同名文件时会停止安装，避免覆盖已有内容。xwPF 按 MIT 许可证发布。
