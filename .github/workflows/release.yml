@@ -1,6 +1,9 @@
 name: Main
 
-on: push
+on:
+  push:
+    branches:
+      - main
 
 permissions:
   contents: write
@@ -17,11 +20,6 @@ jobs:
         run: |
           echo "$(cat *.sh | grep is_sh_ver=)" >> $GITHUB_ENV
           echo "old=$(git tag | tail -n1)" >> $GITHUB_ENV
-      # - name: test
-      #   if: env.is_sh_ver == env.old 
-      #   run: |
-      #     echo not found new version.
-      #     exit 1
       - name: tar
         run: tar zcvf code.tar.gz ./*
       - name: release
